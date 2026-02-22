@@ -159,10 +159,39 @@ html, body {
     <button class="btn" onclick="backToTitle()">MENU</button>
   </div>
 
+  <!-- PVP RULES -->
+  <div id="menuPvpRules" class="menu">
+    <h2>⚔ PVP DUEL ⚔</h2>
+    <div style="height:10px"></div>
+    <div style="font-size:13px; letter-spacing:1px; line-height:2; text-align:center; max-width:320px;">
+      <div style="border:1px solid #fff; padding:12px; margin-bottom:10px;">
+        <div style="font-size:15px; margin-bottom:8px;">RULES</div>
+        <div>DESTROY ENEMY BASE</div>
+        <div>OR ELIMINATE OPPONENT</div>
+        <div>PROTECT YOUR OWN BASE!</div>
+      </div>
+      <div style="display:flex; justify-content:space-between; gap:20px;">
+        <div style="border:1px solid #fff; padding:10px; flex:1;">
+          <div style="font-size:14px;">P1 ▽</div>
+          <div style="font-size:11px; opacity:0.7;">BASE: BOTTOM</div>
+          <div style="font-size:11px; opacity:0.7;">5 LIVES</div>
+        </div>
+        <div style="border:1px solid #fff; padding:10px; flex:1;">
+          <div style="font-size:14px;">P2 △</div>
+          <div style="font-size:11px; opacity:0.7;">BASE: TOP</div>
+          <div style="font-size:11px; opacity:0.7;">5 LIVES</div>
+        </div>
+      </div>
+    </div>
+    <div style="height:10px"></div>
+    <div class="info" id="pvpRulesCountdown">STARTING IN 5...</div>
+  </div>
+
   <!-- PVP RESULT -->
   <div id="menuPvpResult" class="menu">
     <h1 id="pvpResultTitle">PLAYER 1 WINS</h1>
     <h2 id="pvpResultSub"></h2>
+    <div id="pvpResultStats" style="font-size:12px; letter-spacing:1px; line-height:1.8; margin-top:10px;"></div>
     <div style="height:20px"></div>
     <button class="btn" onclick="backToTitle()">MENU</button>
   </div>
@@ -455,6 +484,10 @@ let levelIntroTimer = 0;
 let baseDestroyed = false;
 let base2Destroyed = false;
 let pvpPowerupTimer = 0;
+let pvpLabelTimer = 0;
+let pvpEndTimer = 0;
+let pvpEndWinner = 0;
+let pvpEndReason = '';
 
 // ============================================================
 // PLAYER / ENEMY / BULLET CLASSES
@@ -736,27 +769,63 @@ function showPvpResult(winner, reason) {
   } else {
     title = `PLAYER ${winner} WINS`;
     const isMe = winner === playerNumber;
-    sub = isMe ? 'VICTORY' : 'DEFEAT';
+    sub = isMe ? 'VICTORY!' : 'DEFEAT';
   }
   if (reason === 'base') sub += ' - BASE DESTROYED';
-  if (reason === 'lives') sub += ' - NO LIVES LEFT';
+  if (reason === 'lives') sub += ' - ELIMINATED';
   document.getElementById('pvpResultTitle').textContent = title;
   document.getElementById('pvpResultSub').textContent = sub;
+
+  // Show stats
+  const p1 = players[0];
+  const p2 = players[1];
+  let statsHTML = `P1 KILLS: ${pvpScores[0]} | P2 KILLS: ${pvpScores[1]}`;
+  statsHTML += `<br>P1 LIVES: ${p1 ? p1.lives : 0} | P2 LIVES: ${p2 ? p2.lives : 0}`;
+  statsHTML += `<br>P1 BASE: ${baseDestroyed ? 'DESTROYED' : 'INTACT'} | P2 BASE: ${base2Destroyed ? 'DESTROYED' : 'INTACT'}`;
+  document.getElementById('pvpResultStats').innerHTML = statsHTML;
+
   showMenu('menuPvpResult');
   document.getElementById('controls').style.display = 'none';
   document.getElementById('hud').style.display = 'none';
   if (winner === playerNumber) SFX.victory(); else SFX.gameOver();
 }
 
+let pvpRulesCountdownId = null;
+
 function showLevelIntro() {
   gameState = 'levelIntro';
-  document.getElementById('levelTitle').textContent = 'LEVEL ' + (currentLevel + 1);
-  showMenu('menuLevel');
-  document.getElementById('controls').style.display = 'none';
-  document.getElementById('hud').style.display = 'none';
-  levelIntroTimer = 120;
   initLevel();
-  SFX.levelStart();
+
+  if (gameMode === 'pvp') {
+    // Show PvP rules screen with countdown
+    showMenu('menuPvpRules');
+    document.getElementById('controls').style.display = 'none';
+    document.getElementById('hud').style.display = 'none';
+    levelIntroTimer = 300; // 5 seconds at 60fps
+    SFX.levelStart();
+
+    // Visual countdown
+    let countSec = 5;
+    document.getElementById('pvpRulesCountdown').textContent = `STARTING IN ${countSec}...`;
+    if (pvpRulesCountdownId) clearInterval(pvpRulesCountdownId);
+    pvpRulesCountdownId = setInterval(() => {
+      countSec--;
+      if (countSec <= 0) {
+        clearInterval(pvpRulesCountdownId);
+        pvpRulesCountdownId = null;
+        document.getElementById('pvpRulesCountdown').textContent = 'FIGHT!';
+      } else {
+        document.getElementById('pvpRulesCountdown').textContent = `STARTING IN ${countSec}...`;
+      }
+    }, 1000);
+  } else {
+    document.getElementById('levelTitle').textContent = 'LEVEL ' + (currentLevel + 1);
+    showMenu('menuLevel');
+    document.getElementById('controls').style.display = 'none';
+    document.getElementById('hud').style.display = 'none';
+    levelIntroTimer = 120;
+    SFX.levelStart();
+  }
 }
 
 function showGameOver() {
@@ -932,6 +1001,10 @@ function initPvpLevel() {
 
   // Spawn powerups periodically in PvP
   pvpPowerupTimer = 300;
+  pvpLabelTimer = 300; // Show DEFEND/ATTACK labels for 5 seconds
+  pvpEndTimer = 0;
+  pvpEndWinner = 0;
+  pvpEndReason = '';
 }
 
 // ============================================================
@@ -1338,9 +1411,20 @@ function updateSimulation() {
     else if (!players[0].alive && !players[1].alive) { winner = 0; reason = 'lives'; }
 
     if (winner !== 0 || reason) {
-      if (isMultiplayer) sendNet({ type: 'pvp_result', winner, reason });
-      showPvpResult(winner, reason);
-      return;
+      // Delay ending so player sees the explosion
+      if (!pvpEndTimer) {
+        pvpEndTimer = 90; // 1.5 seconds
+        pvpEndWinner = winner;
+        pvpEndReason = reason;
+      }
+      pvpEndTimer--;
+      if (pvpEndTimer <= 0) {
+        pvpEndTimer = 0;
+        if (isMultiplayer) sendNet({ type: 'pvp_result', winner: pvpEndWinner, reason: pvpEndReason });
+        showPvpResult(pvpEndWinner, pvpEndReason);
+        return;
+      }
+      return; // Continue rendering but stop gameplay updates
     }
   } else {
     if (baseDestroyed || players.every(p => !p.alive)) {
@@ -1512,23 +1596,35 @@ function draw() {
           }
         }
       } else if (t === T_BASE) {
-        // P1 base: eagle/flag symbol
-        ctx.fillStyle = '#fff';
+        // P1 base: solid outlined square with "1" inside (blinks in PvP)
+        const baseBlink = gameMode === 'pvp' && frameTick % 60 < 6;
+        ctx.fillStyle = baseBlink ? '#000' : '#fff';
+        ctx.fillRect(x, y, TILE, TILE);
+        ctx.fillStyle = baseBlink ? '#fff' : '#000';
         ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
-        ctx.fillStyle = '#000';
-        ctx.fillRect(x + 4, y + 4, TILE - 8, TILE - 8);
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(x + TILE/2 - 1, y + 3, 2, TILE - 6);
-        ctx.fillRect(x + TILE/2 + 1, y + 3, 5, 4);
+        ctx.fillStyle = baseBlink ? '#000' : '#fff';
+        // Draw "1" or eagle
+        if (gameMode === 'pvp') {
+          ctx.font = 'bold 11px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('P1', x + TILE/2, y + TILE/2);
+        } else {
+          ctx.fillRect(x + TILE/2 - 1, y + 3, 2, TILE - 6);
+          ctx.fillRect(x + TILE/2 + 1, y + 3, 5, 4);
+        }
       } else if (t === T_BASE2) {
-        // P2 base: inverted flag symbol
-        ctx.fillStyle = '#fff';
+        // P2 base: dashed outlined square with "2" inside (blinks)
+        const base2Blink = frameTick % 60 < 6;
+        ctx.fillStyle = base2Blink ? '#000' : '#fff';
+        ctx.fillRect(x, y, TILE, TILE);
+        ctx.fillStyle = base2Blink ? '#fff' : '#000';
         ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
-        ctx.fillStyle = '#000';
-        ctx.fillRect(x + 4, y + 4, TILE - 8, TILE - 8);
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(x + TILE/2 - 1, y + 3, 2, TILE - 6);
-        ctx.fillRect(x + TILE/2 - 6, y + 3, 5, 4);
+        ctx.fillStyle = base2Blink ? '#000' : '#fff';
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('P2', x + TILE/2, y + TILE/2);
       }
     }
   }
@@ -1604,7 +1700,7 @@ function draw() {
     }
   }
 
-  // Draw base destroyed marker
+  // Draw base destroyed markers
   if (baseDestroyed) {
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2;
@@ -1614,6 +1710,51 @@ function draw() {
     ctx.moveTo(bx - 10, by - 10); ctx.lineTo(bx + 10, by + 10);
     ctx.moveTo(bx + 10, by - 10); ctx.lineTo(bx - 10, by + 10);
     ctx.stroke();
+  }
+  if (base2Destroyed) {
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    const bx2 = Math.floor(COLS / 2) * TILE + TILE/2;
+    const by2 = 2 * TILE + TILE/2;
+    ctx.beginPath();
+    ctx.moveTo(bx2 - 10, by2 - 10); ctx.lineTo(bx2 + 10, by2 + 10);
+    ctx.moveTo(bx2 + 10, by2 - 10); ctx.lineTo(bx2 - 10, by2 + 10);
+    ctx.stroke();
+  }
+
+  // PvP: Draw floating base labels during first few seconds and arrow indicators
+  if (gameMode === 'pvp') {
+    const bx = Math.floor(COLS / 2) * TILE + TILE/2;
+    const byP1 = (ROWS - 3) * TILE + TILE/2;
+    const byP2 = 2 * TILE + TILE/2;
+
+    // Permanent small labels near bases
+    ctx.font = '7px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    if (!baseDestroyed) {
+      ctx.fillText('P1', bx, byP1 + TILE + 4);
+    }
+    if (!base2Destroyed) {
+      ctx.fillText('P2', bx, byP2 - TILE + 2);
+    }
+
+    // Arrow pointing to YOUR base (defend) and ENEMY base (attack) — shown for first 5 seconds (300 frames)
+    if (pvpLabelTimer > 0) {
+      pvpLabelTimer--;
+      const alpha = pvpLabelTimer > 60 ? 1 : pvpLabelTimer / 60;
+      if (frameTick % 30 < 22) {
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#fff';
+        const myBaseY = playerNumber === 1 ? byP1 : byP2;
+        const enemyBaseY = playerNumber === 1 ? byP2 : byP1;
+        ctx.globalAlpha = alpha;
+        ctx.fillText('DEFEND!', bx, myBaseY + (playerNumber === 1 ? TILE + 14 : -TILE - 6));
+        ctx.fillText('ATTACK!', bx, enemyBaseY + (playerNumber === 1 ? -TILE - 6 : TILE + 14));
+        ctx.globalAlpha = 1;
+      }
+    }
   }
 
   // Trees render on top (cover)
@@ -1641,17 +1782,24 @@ function draw() {
   // Update HUD
   const p1 = players[0];
   const p2 = players[1];
-  let livesText = p1 ? `P1:${p1.lives}` : 'P1:0';
-  if (p2) livesText += ` P2:${p2.lives}`;
-  document.getElementById('hudLives').textContent = livesText;
   if (gameMode === 'pvp') {
-    document.getElementById('hudLevel').textContent = 'PVP';
-    document.getElementById('hudEnemies').textContent = `K ${pvpScores[0]}-${pvpScores[1]}`;
+    const me = playerNumber;
+    const myP = players[me - 1];
+    const oppP = players[me === 1 ? 1 : 0];
+    const myBase = me === 1 ? !baseDestroyed : !base2Destroyed;
+    const oppBase = me === 1 ? !base2Destroyed : !baseDestroyed;
+    document.getElementById('hudLives').textContent = `YOU:${myP ? myP.lives : 0}${myBase ? '' : ' BASE LOST!'}`;
+    document.getElementById('hudLevel').textContent = `P${me}`;
+    document.getElementById('hudEnemies').textContent = `FOE:${oppP ? oppP.lives : 0}${oppBase ? '' : ' NO BASE'}`;
+    document.getElementById('hudScore').textContent = `KILLS ${pvpScores[0]}-${pvpScores[1]}`;
   } else {
+    let livesText = p1 ? `P1:${p1.lives}` : 'P1:0';
+    if (p2) livesText += ` P2:${p2.lives}`;
+    document.getElementById('hudLives').textContent = livesText;
     document.getElementById('hudLevel').textContent = 'LV ' + (currentLevel + 1);
     document.getElementById('hudEnemies').textContent = 'EN:' + (enemiesRemaining + enemies.filter(e => e.alive).length);
+    document.getElementById('hudScore').textContent = score;
   }
-  document.getElementById('hudScore').textContent = gameMode === 'pvp' ? '' : score;
 }
 
 function drawTank(tank, isFilled) {
@@ -1716,9 +1864,14 @@ function drawTank(tank, isFilled) {
     }
 
     // Player number marker
-    if (tank.playerNum === 2) {
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(-2, 0, 4, 4);
+    ctx.font = '7px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fff';
+    if (tank.playerNum === 1) {
+      ctx.fillText('1', 0, 1);
+    } else if (tank.playerNum === 2) {
+      ctx.fillText('2', 0, 1);
     }
   }
 
