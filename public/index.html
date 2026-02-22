@@ -163,6 +163,14 @@ html, body {
     <button class="btn" onclick="backToTitle()">MENU</button>
   </div>
 
+  <!-- PAUSE -->
+  <div id="menuPause" class="menu">
+    <h1>PAUSED</h1>
+    <div style="height:20px"></div>
+    <button class="btn" onclick="resumeGame()">RESUME</button>
+    <button class="btn" onclick="quitGame()">QUIT</button>
+  </div>
+
   <!-- PVP RULES -->
   <div id="menuPvpRules" class="menu">
     <h2>⚔ PVP DUEL ⚔</h2>
@@ -217,6 +225,7 @@ html, body {
   <span id="hudLevel">LV 1</span>
   <span id="hudEnemies">EN:20</span>
   <span id="hudScore">0</span>
+  <span id="pauseBtn" onclick="pauseGame()" style="cursor:pointer; border:1px solid #fff; padding:2px 8px;">| |</span>
 </div>
 
 <script>
@@ -547,6 +556,10 @@ let keysDown = {};
 document.addEventListener('keydown', e => {
   keysDown[e.key] = true;
   if (e.key === ' ' || e.key === 'Enter') inputFire = true;
+  if (e.key === 'Escape') {
+    if (gameState === 'playing') pauseGame();
+    else if (gameState === 'paused') resumeGame();
+  }
 });
 document.addEventListener('keyup', e => {
   keysDown[e.key] = false;
@@ -881,6 +894,20 @@ function playAgain() {
   }
 
   showLevelIntro();
+}
+
+function pauseGame() {
+  if (gameState !== 'playing') return;
+  gameState = 'paused';
+  showMenu('menuPause');
+  document.getElementById('controls').style.display = 'none';
+}
+
+function resumeGame() {
+  gameState = 'playing';
+  showMenu(null);
+  document.getElementById('controls').style.display = 'block';
+  document.getElementById('hud').style.display = 'flex';
 }
 
 function quitGame() {
@@ -1585,7 +1612,7 @@ function draw() {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  if (gameState !== 'playing' && gameState !== 'levelIntro') return;
+  if (gameState !== 'playing' && gameState !== 'levelIntro' && gameState !== 'paused') return;
 
   ctx.save();
 
