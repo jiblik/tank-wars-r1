@@ -140,6 +140,8 @@ html, body {
   <!-- LEVEL INTRO -->
   <div id="menuLevel" class="menu">
     <h1 id="levelTitle">LEVEL 1</h1>
+    <div style="height:10px"></div>
+    <button class="btn" onclick="quitGame()">BACK</button>
   </div>
 
   <!-- GAME OVER -->
@@ -147,6 +149,7 @@ html, body {
     <h1>GAME OVER</h1>
     <h2 id="finalScore">SCORE: 0</h2>
     <div style="height:20px"></div>
+    <button class="btn" onclick="playAgain()">PLAY AGAIN</button>
     <button class="btn" onclick="backToTitle()">MENU</button>
   </div>
 
@@ -156,6 +159,7 @@ html, body {
     <h2 id="victoryScore">SCORE: 0</h2>
     <div class="info">ALL LEVELS CLEARED</div>
     <div style="height:20px"></div>
+    <button class="btn" onclick="playAgain()">PLAY AGAIN</button>
     <button class="btn" onclick="backToTitle()">MENU</button>
   </div>
 
@@ -193,6 +197,7 @@ html, body {
     <h2 id="pvpResultSub"></h2>
     <div id="pvpResultStats" style="font-size:12px; letter-spacing:1px; line-height:1.8; margin-top:10px;"></div>
     <div style="height:20px"></div>
+    <button class="btn" onclick="playAgain()">PLAY AGAIN</button>
     <button class="btn" onclick="backToTitle()">MENU</button>
   </div>
 </div>
@@ -655,6 +660,15 @@ function handleNetMessage(msg) {
         showLevelIntro();
       }
       break;
+
+    case 'restart':
+      // Other player wants to play again
+      if (msg.mode) gameMode = msg.mode;
+      score = 0;
+      pvpScores = [0, 0];
+      currentLevel = 0;
+      showLevelIntro();
+      break;
   }
 }
 
@@ -847,6 +861,34 @@ function showVictory() {
 }
 
 function backToTitle() {
+  gameState = 'title';
+  showMenu('menuTitle');
+  if (ws) ws.close();
+}
+
+function playAgain() {
+  // Restart game in same room (no need to recreate room)
+  score = 0;
+  pvpScores = [0, 0];
+  currentLevel = 0;
+
+  if (isMultiplayer && isHost) {
+    // Host tells guest to restart
+    sendNet({ type: 'restart', mode: gameMode });
+  } else if (isMultiplayer && !isHost) {
+    // Guest requests restart from host
+    sendNet({ type: 'restart', mode: gameMode });
+  }
+
+  showLevelIntro();
+}
+
+function quitGame() {
+  // Back button during level intro — return to title
+  if (pvpRulesCountdownId) {
+    clearInterval(pvpRulesCountdownId);
+    pvpRulesCountdownId = null;
+  }
   gameState = 'title';
   showMenu('menuTitle');
   if (ws) ws.close();

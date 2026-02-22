@@ -98,12 +98,20 @@ wss.on('connection', (ws) => {
       case 'state':
       case 'game_over':
       case 'level_complete':
-      case 'pvp_result': {
-        // Forward host state to guest
+      case 'pvp_result':
+      case 'restart': {
+        // Forward host messages to guest
         if (myRoom && myRole === 'host') {
           const room = rooms.get(myRoom);
           if (room && room.guest && room.guest.readyState === 1) {
             room.guest.send(raw.toString());
+          }
+        }
+        // Also allow guest to send restart request to host
+        if (myRoom && myRole === 'guest' && msg.type === 'restart') {
+          const room = rooms.get(myRoom);
+          if (room && room.host && room.host.readyState === 1) {
+            room.host.send(raw.toString());
           }
         }
         break;
