@@ -1,0 +1,12 @@
+{
+  "name": "battle-city-r1",
+  "version": "1.0.0",
+  "description": "Battle City clone - black & white retro style with 2-player co-op",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
