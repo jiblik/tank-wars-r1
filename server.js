@@ -35,7 +35,7 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 
 // Room management
-const rooms = new Map(); // code -> { host: ws, guest: ws }
+const rooms = new Map(); // code -> { host: ws, guest: ws, mode: string }
 
 function generateCode() {
   let code;
@@ -56,11 +56,11 @@ wss.on('connection', (ws) => {
     switch (msg.type) {
       case 'create_room': {
         const code = generateCode();
-        rooms.set(code, { host: ws, guest: null });
+        rooms.set(code, { host: ws, guest: null, mode: msg.mode || 'coop' });
         myRoom = code;
         myRole = 'host';
         ws.send(JSON.stringify({ type: 'room_created', code }));
-        console.log(`Room ${code} created`);
+        console.log(`Room ${code} created (${msg.mode || 'coop'})`);
         break;
       }
 
@@ -77,9 +77,9 @@ wss.on('connection', (ws) => {
         room.guest = ws;
         myRoom = msg.code;
         myRole = 'guest';
-        // Notify both
+        // Notify both (pass mode to guest)
         room.host.send(JSON.stringify({ type: 'player_joined' }));
-        ws.send(JSON.stringify({ type: 'join_ok' }));
+        ws.send(JSON.stringify({ type: 'join_ok', mode: room.mode }));
         console.log(`Player joined room ${msg.code}`);
         break;
       }
@@ -97,7 +97,8 @@ wss.on('connection', (ws) => {
 
       case 'state':
       case 'game_over':
-      case 'level_complete': {
+      case 'level_complete':
+      case 'pvp_result': {
         // Forward host state to guest
         if (myRoom && myRole === 'host') {
           const room = rooms.get(myRoom);

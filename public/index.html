@@ -100,13 +100,24 @@ html, body {
     <h2>R 1</h2>
     <div style="height:20px"></div>
     <button class="btn" onclick="startSinglePlayer()">SINGLE PLAYER</button>
-    <button class="btn" onclick="showCreateRoom()">CREATE ROOM</button>
+    <button class="btn" onclick="showModeSelect()">CREATE ROOM</button>
     <button class="btn" onclick="showJoinRoom()">JOIN ROOM</button>
+  </div>
+
+  <!-- MODE SELECT -->
+  <div id="menuMode" class="menu">
+    <h2>SELECT MODE</h2>
+    <div style="height:10px"></div>
+    <button class="btn" onclick="showCreateRoom('coop')">CO-OP VS AI</button>
+    <button class="btn" onclick="showCreateRoom('pvp')">PVP DUEL</button>
+    <div style="height:10px"></div>
+    <button class="btn" onclick="backToTitle()">BACK</button>
   </div>
 
   <!-- CREATE ROOM -->
   <div id="menuCreate" class="menu">
     <h2>WAITING FOR PLAYER 2</h2>
+    <div id="modeLabel" class="info">CO-OP</div>
     <div style="height:10px"></div>
     <div class="info">ROOM CODE</div>
     <div id="roomCode" class="code-display">----</div>
@@ -144,6 +155,14 @@ html, body {
     <h1>VICTORY</h1>
     <h2 id="victoryScore">SCORE: 0</h2>
     <div class="info">ALL LEVELS CLEARED</div>
+    <div style="height:20px"></div>
+    <button class="btn" onclick="backToTitle()">MENU</button>
+  </div>
+
+  <!-- PVP RESULT -->
+  <div id="menuPvpResult" class="menu">
+    <h1 id="pvpResultTitle">PLAYER 1 WINS</h1>
+    <h2 id="pvpResultSub"></h2>
     <div style="height:20px"></div>
     <button class="btn" onclick="backToTitle()">MENU</button>
   </div>
@@ -411,12 +430,14 @@ window.addEventListener('resize', resizeCanvas);
 // ============================================================
 // GAME STATE
 // ============================================================
-let gameState = 'title'; // title, creating, joining, levelIntro, playing, gameOver, victory
+let gameState = 'title';
 let currentLevel = 0;
 let score = 0;
 let isMultiplayer = false;
 let isHost = false;
 let playerNumber = 1;
+let gameMode = 'coop'; // 'coop' or 'pvp'
+let pvpScores = [0, 0]; // P1 kills, P2 kills
 
 // Game objects
 let grid = [];
@@ -432,6 +453,8 @@ let spawnDelay = 180; // frames
 let maxActiveEnemies = 4;
 let levelIntroTimer = 0;
 let baseDestroyed = false;
+let base2Destroyed = false;
+let pvpPowerupTimer = 0;
 
 // ============================================================
 // PLAYER / ENEMY / BULLET CLASSES
@@ -562,6 +585,7 @@ function handleNetMessage(msg) {
     case 'join_ok':
       playerNumber = 2;
       isHost = false;
+      if (msg.mode) gameMode = msg.mode;
       startMultiplayerGame();
       break;
 
@@ -586,6 +610,10 @@ function handleNetMessage(msg) {
 
     case 'game_over':
       showGameOver();
+      break;
+
+    case 'pvp_result':
+      showPvpResult(msg.winner, msg.reason);
       break;
 
     case 'level_complete':
@@ -613,6 +641,8 @@ function applyNetState(msg) {
   if (msg.score !== undefined) score = msg.score;
   if (msg.enemiesRemaining !== undefined) enemiesRemaining = msg.enemiesRemaining;
   baseDestroyed = !!msg.baseDestroyed;
+  base2Destroyed = !!msg.base2Destroyed;
+  if (msg.pvpScores) pvpScores = msg.pvpScores;
 }
 
 let netSyncTimer = 0;
@@ -638,15 +668,20 @@ function startSinglePlayer() {
   showLevelIntro();
 }
 
-function showCreateRoom() {
+function showModeSelect() {
+  showMenu('menuMode');
+}
+
+function showCreateRoom(mode) {
+  gameMode = mode || 'coop';
   gameState = 'creating';
+  document.getElementById('modeLabel').textContent = gameMode === 'pvp' ? 'PVP DUEL' : 'CO-OP VS AI';
   showMenu('menuCreate');
   connectWS();
-  // Wait for connection then create room
   const waitForWs = setInterval(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       clearInterval(waitForWs);
-      sendNet({ type: 'create_room' });
+      sendNet({ type: 'create_room', mode: gameMode });
     }
   }, 100);
   isMultiplayer = true;
@@ -687,8 +722,30 @@ function cancelJoin() {
 
 function startMultiplayerGame() {
   score = 0;
+  pvpScores = [0, 0];
   currentLevel = 0;
   showLevelIntro();
+}
+
+function showPvpResult(winner, reason) {
+  gameState = 'pvpResult';
+  let title, sub;
+  if (winner === 0) {
+    title = 'DRAW';
+    sub = '';
+  } else {
+    title = `PLAYER ${winner} WINS`;
+    const isMe = winner === playerNumber;
+    sub = isMe ? 'VICTORY' : 'DEFEAT';
+  }
+  if (reason === 'base') sub += ' - BASE DESTROYED';
+  if (reason === 'lives') sub += ' - NO LIVES LEFT';
+  document.getElementById('pvpResultTitle').textContent = title;
+  document.getElementById('pvpResultSub').textContent = sub;
+  showMenu('menuPvpResult');
+  document.getElementById('controls').style.display = 'none';
+  document.getElementById('hud').style.display = 'none';
+  if (winner === playerNumber) SFX.victory(); else SFX.gameOver();
 }
 
 function showLevelIntro() {
@@ -730,22 +787,26 @@ function backToTitle() {
 // LEVEL INIT
 // ============================================================
 function initLevel() {
-  const lvl = currentLevel % LEVELS.length;
-  // Deep copy grid
-  grid = LEVELS[lvl].map(row => [...row]);
-
   players = [];
   enemies = [];
   bullets = [];
   effects = [];
   powerups = [];
   baseDestroyed = false;
+  base2Destroyed = false;
+
+  if (gameMode === 'pvp') {
+    initPvpLevel();
+    return;
+  }
+
+  const lvl = currentLevel % LEVELS.length;
+  grid = LEVELS[lvl].map(row => [...row]);
 
   // Player 1 spawn
   const p1 = createTank(4 * TILE + TILE/2, (ROWS - 3) * TILE + TILE/2, 'up', true, 1);
   players.push(p1);
 
-  // Player 2 (multiplayer or not)
   if (isMultiplayer) {
     const p2 = createTank((COLS - 8) * TILE + TILE/2, (ROWS - 3) * TILE + TILE/2, 'up', true, 2);
     players.push(p2);
@@ -756,6 +817,121 @@ function initLevel() {
   maxActiveEnemies = 3 + Math.floor(diff / 2);
   spawnDelay = Math.max(60, 180 - diff * 10);
   spawnTimer = 60;
+}
+
+// T_BASE2 = 6 (player 2's base in PvP)
+const T_BASE2 = 6;
+
+function initPvpLevel() {
+  // Generate symmetrical PvP arena
+  grid = [];
+  for (let r = 0; r < ROWS; r++) {
+    grid[r] = [];
+    for (let c = 0; c < COLS; c++) {
+      grid[r][c] = T_EMPTY;
+    }
+  }
+
+  // Border
+  for (let c = 0; c < COLS; c++) { grid[0][c] = T_STEEL; grid[ROWS-1][c] = T_STEEL; }
+  for (let r = 0; r < ROWS; r++) { grid[r][0] = T_STEEL; grid[r][COLS-1] = T_STEEL; }
+
+  const bx = Math.floor(COLS / 2);
+
+  // P1 base at bottom
+  grid[ROWS - 3][bx] = T_BASE;
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      if (dr === 0 && dc === 0) continue;
+      const rr = ROWS - 3 + dr, cc = bx + dc;
+      if (rr > 0 && rr < ROWS-1 && cc > 0 && cc < COLS-1 && grid[rr][cc] === T_EMPTY) {
+        grid[rr][cc] = T_BRICK;
+      }
+    }
+  }
+
+  // P2 base at top
+  grid[2][bx] = T_BASE2;
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      if (dr === 0 && dc === 0) continue;
+      const rr = 2 + dr, cc = bx + dc;
+      if (rr > 0 && rr < ROWS-1 && cc > 0 && cc < COLS-1 && grid[rr][cc] === T_EMPTY) {
+        grid[rr][cc] = T_BRICK;
+      }
+    }
+  }
+
+  // Seeded random for symmetrical obstacles
+  let seed = (currentLevel + 1) * 3571;
+  function rng() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
+
+  // Generate obstacles in bottom half, mirror to top
+  const midRow = Math.floor(ROWS / 2);
+  const numClusters = 8 + currentLevel * 2;
+  for (let i = 0; i < numClusters; i++) {
+    const cx = Math.floor(rng() * (COLS - 6)) + 3;
+    const cy = midRow + Math.floor(rng() * (midRow - 5)) + 2;
+    const w = Math.floor(rng() * 3) + 1;
+    const h = Math.floor(rng() * 2) + 1;
+    const tileType = rng() < 0.2 ? T_STEEL : T_BRICK;
+    for (let dr = 0; dr < h; dr++) {
+      for (let dc = 0; dc < w; dc++) {
+        const rr = cy + dr, cc = cx + dc;
+        const mrr = ROWS - 1 - rr; // mirror row
+        if (rr > midRow - 2 && rr < ROWS - 4 && cc > 0 && cc < COLS - 1) {
+          if (grid[rr][cc] === T_EMPTY) grid[rr][cc] = tileType;
+          if (grid[mrr][cc] === T_EMPTY) grid[mrr][cc] = tileType;
+        }
+      }
+    }
+  }
+
+  // Middle divider with gaps
+  for (let c = 1; c < COLS - 1; c++) {
+    if (grid[midRow][c] === T_EMPTY && rng() < 0.4) {
+      grid[midRow][c] = T_STEEL;
+    }
+  }
+
+  // Clear spawn areas
+  const clearAreas = [
+    [ROWS - 3, Math.floor(COLS / 2)],     // P1 base area
+    [ROWS - 3, 4],                          // P1 spawn
+    [2, Math.floor(COLS / 2)],              // P2 base area
+    [2, COLS - 5],                           // P2 spawn
+  ];
+  for (const [sy, sx] of clearAreas) {
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        const rr = sy + dr, cc = sx + dc;
+        if (rr >= 1 && rr < ROWS-1 && cc >= 1 && cc < COLS-1) {
+          if (grid[rr][cc] !== T_BASE && grid[rr][cc] !== T_BASE2 && grid[rr][cc] !== T_STEEL) {
+            // Only clear non-border steel
+            if (rr > 0 && rr < ROWS-1 && cc > 0 && cc < COLS-1) {
+              grid[rr][cc] = T_EMPTY;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // P1: bottom, facing up
+  const p1 = createTank(4 * TILE + TILE/2, (ROWS - 3) * TILE + TILE/2, 'up', true, 1);
+  p1.lives = 5;
+  players.push(p1);
+
+  // P2: top, facing down
+  const p2 = createTank((COLS - 5) * TILE + TILE/2, 2 * TILE + TILE/2, 'down', true, 2);
+  p2.lives = 5;
+  players.push(p2);
+
+  enemiesRemaining = 0;
+  maxActiveEnemies = 0;
+
+  // Spawn powerups periodically in PvP
+  pvpPowerupTimer = 300;
 }
 
 // ============================================================
@@ -830,7 +1006,7 @@ function isBlocked(x, y, size, excludeTank) {
   ];
   for (const [cx, cy] of corners) {
     const t = tileAt(cx, cy);
-    if (t === T_BRICK || t === T_STEEL || t === T_WATER || t === T_BASE) return true;
+    if (t === T_BRICK || t === T_STEEL || t === T_WATER || t === T_BASE || t === T_BASE2) return true;
   }
   // Check collision with other tanks
   const allTanks = [...players, ...enemies];
@@ -912,6 +1088,8 @@ function update() {
           score,
           enemiesRemaining,
           baseDestroyed,
+          base2Destroyed,
+          pvpScores,
         });
       }
     }
@@ -921,11 +1099,23 @@ function update() {
 }
 
 function updateSimulation() {
-  // Spawn enemies
-  spawnTimer--;
-  if (spawnTimer <= 0) {
-    spawnEnemy();
-    spawnTimer = spawnDelay;
+  // Spawn enemies (co-op only)
+  if (gameMode !== 'pvp') {
+    spawnTimer--;
+    if (spawnTimer <= 0) {
+      spawnEnemy();
+      spawnTimer = spawnDelay;
+    }
+  } else {
+    // PvP: periodic powerup spawning
+    pvpPowerupTimer--;
+    if (pvpPowerupTimer <= 0) {
+      pvpPowerupTimer = 400 + Math.floor(Math.random() * 200);
+      const px = (3 + Math.floor(Math.random() * (COLS - 6))) * TILE + TILE / 2;
+      const py = (5 + Math.floor(Math.random() * (ROWS - 10))) * TILE + TILE / 2;
+      const types = ['shield', 'speed', 'life'];
+      powerups.push(createPowerup(px, py, types[Math.floor(Math.random() * types.length)]));
+    }
   }
 
   // Update players
@@ -985,11 +1175,54 @@ function updateSimulation() {
       SFX.baseHit();
       continue;
     }
+    if (tile === T_BASE2) {
+      base2Destroyed = true;
+      grid[tr][tc] = T_EMPTY;
+      b.alive = false;
+      effects.push(createEffect(b.x, b.y, 'explode'));
+      screenShake = 15;
+      SFX.baseHit();
+      continue;
+    }
 
     // Hit tanks
     const isPlayerBullet = players.includes(b.owner);
+
+    // PvP: player bullets hit the OTHER player
+    if (gameMode === 'pvp' && isPlayerBullet) {
+      const otherPlayer = players.find(p => p !== b.owner && p.alive);
+      if (otherPlayer) {
+        if (otherPlayer.shieldTimer > 0) {
+          if (Math.abs(b.x - otherPlayer.x) < otherPlayer.size * 0.5 && Math.abs(b.y - otherPlayer.y) < otherPlayer.size * 0.5) {
+            b.alive = false;
+            effects.push(createEffect(b.x, b.y, 'spark'));
+            continue;
+          }
+        } else if (Math.abs(b.x - otherPlayer.x) < otherPlayer.size * 0.5 && Math.abs(b.y - otherPlayer.y) < otherPlayer.size * 0.5) {
+          b.alive = false;
+          otherPlayer.lives--;
+          effects.push(createEffect(otherPlayer.x, otherPlayer.y, 'explode'));
+          screenShake = 10;
+          SFX.explode();
+          // Track kill score
+          const shooterIdx = players.indexOf(b.owner);
+          if (shooterIdx >= 0) pvpScores[shooterIdx]++;
+          if (otherPlayer.lives <= 0) {
+            otherPlayer.alive = false;
+          } else {
+            // Respawn at own base
+            otherPlayer.x = otherPlayer.playerNum === 1 ? 4 * TILE + TILE/2 : (COLS - 5) * TILE + TILE/2;
+            otherPlayer.y = otherPlayer.playerNum === 1 ? (ROWS - 3) * TILE + TILE/2 : 2 * TILE + TILE/2;
+            otherPlayer.dir = otherPlayer.playerNum === 1 ? 'up' : 'down';
+            otherPlayer.shieldTimer = 120;
+          }
+          continue;
+        }
+      }
+    }
+
     if (isPlayerBullet) {
-      // Hit enemy
+      // Hit enemy (co-op mode)
       for (const e of enemies) {
         if (!e.alive) continue;
         if (Math.abs(b.x - e.x) < e.size * 0.5 && Math.abs(b.y - e.y) < e.size * 0.5) {
@@ -1093,21 +1326,38 @@ function updateSimulation() {
     if (effects[i].timer <= 0) effects.splice(i, 1);
   }
 
-  // Check game over
-  if (baseDestroyed || players.every(p => !p.alive)) {
-    if (isMultiplayer) sendNet({ type: 'game_over' });
-    showGameOver();
-    return;
-  }
+  // Check game over / PvP win
+  if (gameMode === 'pvp') {
+    // PvP win conditions
+    let winner = 0, reason = '';
+    if (base2Destroyed && !baseDestroyed) { winner = 1; reason = 'base'; }
+    else if (baseDestroyed && !base2Destroyed) { winner = 2; reason = 'base'; }
+    else if (baseDestroyed && base2Destroyed) { winner = 0; reason = 'base'; }
+    else if (!players[0].alive && players[1].alive) { winner = 2; reason = 'lives'; }
+    else if (players[0].alive && !players[1].alive) { winner = 1; reason = 'lives'; }
+    else if (!players[0].alive && !players[1].alive) { winner = 0; reason = 'lives'; }
 
-  // Check level complete
-  if (enemiesRemaining <= 0 && enemies.length === 0) {
-    currentLevel++;
-    if (currentLevel >= LEVELS.length) {
-      showVictory();
-    } else {
-      if (isMultiplayer) sendNet({ type: 'level_complete', level: currentLevel });
-      showLevelIntro();
+    if (winner !== 0 || reason) {
+      if (isMultiplayer) sendNet({ type: 'pvp_result', winner, reason });
+      showPvpResult(winner, reason);
+      return;
+    }
+  } else {
+    if (baseDestroyed || players.every(p => !p.alive)) {
+      if (isMultiplayer) sendNet({ type: 'game_over' });
+      showGameOver();
+      return;
+    }
+
+    // Check level complete
+    if (enemiesRemaining <= 0 && enemies.length === 0) {
+      currentLevel++;
+      if (currentLevel >= LEVELS.length) {
+        showVictory();
+      } else {
+        if (isMultiplayer) sendNet({ type: 'level_complete', level: currentLevel });
+        showLevelIntro();
+      }
     }
   }
 
@@ -1262,15 +1512,23 @@ function draw() {
           }
         }
       } else if (t === T_BASE) {
-        // Eagle/flag symbol
+        // P1 base: eagle/flag symbol
         ctx.fillStyle = '#fff';
         ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
         ctx.fillStyle = '#000';
         ctx.fillRect(x + 4, y + 4, TILE - 8, TILE - 8);
-        // Flag
         ctx.fillStyle = '#fff';
         ctx.fillRect(x + TILE/2 - 1, y + 3, 2, TILE - 6);
         ctx.fillRect(x + TILE/2 + 1, y + 3, 5, 4);
+      } else if (t === T_BASE2) {
+        // P2 base: inverted flag symbol
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(x + 4, y + 4, TILE - 8, TILE - 8);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(x + TILE/2 - 1, y + 3, 2, TILE - 6);
+        ctx.fillRect(x + TILE/2 - 6, y + 3, 5, 4);
       }
     }
   }
@@ -1386,9 +1644,14 @@ function draw() {
   let livesText = p1 ? `P1:${p1.lives}` : 'P1:0';
   if (p2) livesText += ` P2:${p2.lives}`;
   document.getElementById('hudLives').textContent = livesText;
-  document.getElementById('hudLevel').textContent = 'LV ' + (currentLevel + 1);
-  document.getElementById('hudEnemies').textContent = 'EN:' + (enemiesRemaining + enemies.filter(e => e.alive).length);
-  document.getElementById('hudScore').textContent = score;
+  if (gameMode === 'pvp') {
+    document.getElementById('hudLevel').textContent = 'PVP';
+    document.getElementById('hudEnemies').textContent = `K ${pvpScores[0]}-${pvpScores[1]}`;
+  } else {
+    document.getElementById('hudLevel').textContent = 'LV ' + (currentLevel + 1);
+    document.getElementById('hudEnemies').textContent = 'EN:' + (enemiesRemaining + enemies.filter(e => e.alive).length);
+  }
+  document.getElementById('hudScore').textContent = gameMode === 'pvp' ? '' : score;
 }
 
 function drawTank(tank, isFilled) {
