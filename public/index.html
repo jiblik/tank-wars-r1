@@ -354,8 +354,7 @@ const T_BRICK_LEFT = 9;
 const T_BRICK_RIGHT = 10;
 
 const DIR = { up: {x:0,y:-1}, down: {x:0,y:1}, left: {x:-1,y:0}, right: {x:1,y:0} };
-const SNAP_SENS = 8; // grid-snap sensitivity for smooth turning
-const UNIT = TILE * 2; // 1 unit = 2x2 tiles (tank size = 1 unit, like original Battle City)
+const SNAP_SENS = 6; // grid-snap sensitivity for smooth turning
 
 // ============================================================
 // LEVELS
@@ -521,8 +520,8 @@ let statsCountdownId = null;
 function createTank(x, y, dir, isPlayer, playerNum) {
   return {
     x, y, dir,
-    speed: isPlayer ? 1.5 : 0.7,
-    size: UNIT, // 2 tiles = 32px, matches original Battle City
+    speed: isPlayer ? 1.2 : 0.6,
+    size: TILE * 1.5, // 24px — fits through 2-tile corridors (32px)
     isPlayer,
     playerNum: playerNum || 0,
     lives: isPlayer ? 3 : 1,
@@ -1119,11 +1118,18 @@ function isBlocked(x, y, size, excludeTank) {
   for (const [cx, cy] of checkPoints) {
     if (isBlockedAt(cx, cy)) return true;
   }
-  const allTanks = [...players, ...enemies];
-  for (const t of allTanks) {
-    if (t === excludeTank || !t.alive) continue;
-    if (t.spawnTimer > 0) continue; // don't collide with spawning tanks
+  // Tank-tank collisions: enemies only block players, not each other
+  const isEnemy = excludeTank && !excludeTank.isPlayer;
+  for (const t of players) {
+    if (t === excludeTank || !t.alive || t.spawnTimer > 0) continue;
     if (Math.abs(x - t.x) < size * 0.85 && Math.abs(y - t.y) < size * 0.85) return true;
+  }
+  if (!isEnemy) {
+    // Players also collide with enemies
+    for (const t of enemies) {
+      if (t === excludeTank || !t.alive || t.spawnTimer > 0) continue;
+      if (Math.abs(x - t.x) < size * 0.85 && Math.abs(y - t.y) < size * 0.85) return true;
+    }
   }
   return false;
 }
@@ -1532,6 +1538,7 @@ function updateTankMovement(tank, dir) {
 
 function updateEnemyAI(enemy) {
   enemy.aiTurnTimer--;
+  if (!enemy._stuckCount) enemy._stuckCount = 0;
 
   if (enemy.aiTurnTimer <= 0) {
     enemy.aiTurnTimer = 20 + Math.floor(Math.random() * 40);
@@ -1540,15 +1547,41 @@ function updateEnemyAI(enemy) {
     const bx = Math.floor(COLS / 2) * TILE + TILE/2;
     const by = (ROWS - 3) * TILE + TILE/2;
 
-    if (Math.random() < 0.35 && targets.length > 0) {
+    // If stuck multiple times, pick a random open direction
+    if (enemy._stuckCount >= 2) {
+      const dirs = ['up', 'down', 'left', 'right'];
+      // Shuffle and try each direction
+      for (let i = dirs.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [dirs[i], dirs[j]] = [dirs[j], dirs[i]];
+      }
+      const d = DIR[enemy.aiDir];
+      const spd = enemy.speed;
+      let found = false;
+      for (const tryDir of dirs) {
+        if (tryDir === enemy.aiDir) continue; // skip current blocked dir
+        const td = DIR[tryDir];
+        const tx = enemy.x + td.x * spd * 2;
+        const ty = enemy.y + td.y * spd * 2;
+        if (!isBlocked(tx, ty, enemy.size, enemy)) {
+          enemy.aiDir = tryDir;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        enemy.aiDir = dirs[0]; // just pick something
+      }
+      enemy._stuckCount = 0;
+    } else if (Math.random() < 0.35 && targets.length > 0) {
       const target = targets[Math.floor(Math.random() * targets.length)];
       const dx = target.x - enemy.x;
       const dy = target.y - enemy.y;
       enemy.aiDir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
     } else if (Math.random() < 0.4) {
-      // Head towards base with strong downward bias
+      // Head towards base with downward bias
       if (enemy.y < by) {
-        enemy.aiDir = Math.random() < 0.6 ? 'down' : (['left','right'])[Math.floor(Math.random()*2)];
+        enemy.aiDir = Math.random() < 0.5 ? 'down' : (['left','right'])[Math.floor(Math.random()*2)];
       } else {
         const dx = bx - enemy.x;
         enemy.aiDir = Math.abs(dx) > TILE * 2 ? (dx > 0 ? 'right' : 'left') : 'down';
@@ -1561,9 +1594,14 @@ function updateEnemyAI(enemy) {
 
   const prevX = enemy.x, prevY = enemy.y;
   updateTankMovement(enemy, enemy.aiDir);
-  if (Math.abs(enemy.x - prevX) < 0.1 && Math.abs(enemy.y - prevY) < 0.1) enemy.aiTurnTimer = 0;
+  if (Math.abs(enemy.x - prevX) < 0.1 && Math.abs(enemy.y - prevY) < 0.1) {
+    enemy._stuckCount++;
+    enemy.aiTurnTimer = 0; // immediately try a new direction
+  } else {
+    enemy._stuckCount = 0;
+  }
 
-  // Fire: 70% chance every 15 frames (like original)
+  // Fire
   if (enemy.fireCD <= 0 && Math.random() < 0.07) {
     bullets.push(createBullet(enemy.x, enemy.y, enemy.dir, enemy));
     enemy.fireCD = enemy.fireCDMax;
@@ -1778,13 +1816,13 @@ function draw() {
 
 function drawTank(tank, isFilled) {
   const x = tank.x, y = tank.y;
-  const s = (tank.size || UNIT) / 2;
+  const s = (tank.size || TILE*1.5) / 2;
 
   // Spawn animation: blinking
   if (tank.spawnTimer > 0) {
     if (Math.floor(tank.spawnTimer / 4) % 2 === 0) {
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
-      const sz = UNIT * (1 - (tank.spawnTimer / 40));
+      const sz = tank.size * (1 - (tank.spawnTimer / 40));
       ctx.strokeRect(x-sz/2, y-sz/2, sz, sz);
       ctx.strokeRect(x-sz/3, y-sz/3, sz*2/3, sz*2/3);
     }
