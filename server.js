@@ -1,11 +1,12 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 4000;
 
-// Simple static file server
+// Simple static file server with gzip + caching
 const MIME = {
   '.html': 'text/html',
   '.js': 'application/javascript',
@@ -13,9 +14,26 @@ const MIME = {
   '.png': 'image/png',
 };
 
+// Pre-cache gzipped files in memory
+const fileCache = new Map();
+
 const server = http.createServer((req, res) => {
-  let filePath = req.url === '/' ? '/index.html' : req.url;
+  let filePath = req.url === '/' ? '/index.html' : req.url.split('?')[0];
   filePath = path.join(__dirname, 'public', filePath);
+
+  // Serve from cache if available
+  if (fileCache.has(filePath)) {
+    const cached = fileCache.get(filePath);
+    const acceptGzip = (req.headers['accept-encoding'] || '').includes('gzip');
+    if (acceptGzip && cached.gzip) {
+      res.writeHead(200, { 'Content-Type': cached.type, 'Content-Encoding': 'gzip', 'Cache-Control': 'no-cache' });
+      res.end(cached.gzip);
+    } else {
+      res.writeHead(200, { 'Content-Type': cached.type, 'Cache-Control': 'no-cache' });
+      res.end(cached.raw);
+    }
+    return;
+  }
 
   const ext = path.extname(filePath);
   const contentType = MIME[ext] || 'application/octet-stream';
@@ -26,10 +44,31 @@ const server = http.createServer((req, res) => {
       res.end('Not Found');
       return;
     }
-    res.writeHead(200, { 'Content-Type': contentType });
-    res.end(data);
+    // Cache and gzip text files
+    if (ext === '.html' || ext === '.js' || ext === '.css') {
+      zlib.gzip(data, (gzErr, gzData) => {
+        fileCache.set(filePath, { raw: data, gzip: gzErr ? null : gzData, type: contentType });
+        const acceptGzip = (req.headers['accept-encoding'] || '').includes('gzip');
+        if (acceptGzip && !gzErr) {
+          res.writeHead(200, { 'Content-Type': contentType, 'Content-Encoding': 'gzip', 'Cache-Control': 'no-cache' });
+          res.end(gzData);
+        } else {
+          res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-cache' });
+          res.end(data);
+        }
+      });
+    } else {
+      res.writeHead(200, { 'Content-Type': contentType });
+      res.end(data);
+    }
   });
+
 });
+
+// Clear cache when files change (single watcher, outside request handler)
+try {
+  fs.watch(path.join(__dirname, 'public'), { recursive: true }, () => { fileCache.clear(); });
+} catch (e) { /* fs.watch not supported on all platforms */ }
 
 // WebSocket server
 const wss = new WebSocketServer({ server });
