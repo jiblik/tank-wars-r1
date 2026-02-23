@@ -49,6 +49,10 @@ wss.on('connection', (ws) => {
   let myRoom = null;
   let myRole = null; // 'host' or 'guest'
 
+  ws.on('error', (err) => {
+    console.error('WebSocket error:', err.message);
+  });
+
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
@@ -133,6 +137,14 @@ wss.on('connection', (ws) => {
       }
     }
   });
+});
+
+// Prevent crashes from unhandled errors
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err.message);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled rejection:', err);
 });
 
 server.listen(PORT, () => {
