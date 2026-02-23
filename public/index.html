@@ -275,7 +275,10 @@ function playNoise(duration, volume) {
   src.start();
 }
 
-const SFX = {
+// Sound event buffer for network sync (host collects, sends to guest)
+let pendingSfx = [];
+
+const _sfxFns = {
   shoot() { playTone(800, 0.08, 'square', 0.12, 200); },
   hit() { playNoise(0.1, 0.15); playTone(200, 0.1, 'square', 0.1, 80); },
   explode() { playNoise(0.3, 0.2); playTone(100, 0.25, 'sawtooth', 0.12, 30); },
@@ -305,6 +308,28 @@ const SFX = {
   move() { playTone(60, 0.04, 'square', 0.03); },
   baseHit() { playNoise(0.5, 0.25); playTone(60, 0.4, 'sawtooth', 0.15, 20); },
 };
+
+// SFX proxy: plays locally + buffers for network sync
+const SFX = {};
+for (const name of Object.keys(_sfxFns)) {
+  SFX[name] = function() {
+    _sfxFns[name]();
+    if (isMultiplayer && isHost) pendingSfx.push(name);
+  };
+}
+
+// Play sound events received from network
+function playNetSfx(sfxList) {
+  if (!sfxList) return;
+  // Deduplicate to avoid overwhelming audio
+  const seen = new Set();
+  for (const name of sfxList) {
+    if (!seen.has(name) && _sfxFns[name]) {
+      seen.add(name);
+      _sfxFns[name]();
+    }
+  }
+}
 
 // ============================================================
 // CONSTANTS
@@ -703,6 +728,7 @@ function applyNetState(msg) {
   baseDestroyed = !!msg.baseDestroyed;
   base2Destroyed = !!msg.base2Destroyed;
   if (msg.pvpScores) pvpScores = msg.pvpScores;
+  if (msg.sfx) playNetSfx(msg.sfx);
 }
 
 let netSyncTimer = 0;
@@ -1238,7 +1264,9 @@ function update() {
           baseDestroyed,
           base2Destroyed,
           pvpScores,
+          sfx: pendingSfx.length > 0 ? pendingSfx : undefined,
         });
+        pendingSfx = [];
       }
     }
   }
