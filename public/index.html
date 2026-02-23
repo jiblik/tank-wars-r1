@@ -41,6 +41,12 @@ html, body {
   min-width: 220px; text-align: center;
 }
 .btn:active { background: #fff; color: #000; }
+.lvl-btn {
+  background: #000; color: #fff; border: 2px solid #fff;
+  width: 48px; height: 48px; font-family: monospace; font-size: 16px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.lvl-btn:active { background: #fff; color: #000; }
 .code-display {
   font-size: 48px; letter-spacing: 12px;
   border: 2px solid #fff; padding: 12px 24px;
@@ -135,6 +141,15 @@ html, body {
     <button class="btn" onclick="joinRoom()">JOIN</button>
     <button class="btn" onclick="cancelJoin()">CANCEL</button>
     <div id="joinError" class="info" style="color:#fff"></div>
+  </div>
+
+  <!-- LEVEL SELECT -->
+  <div id="menuLevelSelect" class="menu">
+    <h2>SELECT LEVEL</h2>
+    <div style="height:10px"></div>
+    <div id="levelGrid" style="display:grid; grid-template-columns:repeat(5,1fr); gap:8px; max-width:280px;"></div>
+    <div style="height:16px"></div>
+    <button class="btn" onclick="backToTitle()">BACK</button>
   </div>
 
   <!-- LEVEL INTRO -->
@@ -343,19 +358,9 @@ const SNAP_SENS = 8; // grid-snap sensitivity for smooth turning
 const UNIT = TILE * 2; // 1 unit = 2x2 tiles (tank size = 1 unit, like original Battle City)
 
 // ============================================================
-// LEVELS (13x13 unit grid, each unit = 2x2 tiles)
+// LEVELS
 // ============================================================
 const LEVELS = [];
-
-// Place a 2x2 tile block at unit coordinates (ux, uy) on the tile grid
-function placeUnit(grid, ur, uc, tileType) {
-  const tr = ur * 2, tc = uc * 2;
-  for (let dr = 0; dr < 2; dr++) for (let dc = 0; dc < 2; dc++) {
-    const rr = tr + dr, cc = tc + dc;
-    if (rr >= 0 && rr < ROWS && cc >= 0 && cc < COLS && grid[rr][cc] === T_EMPTY)
-      grid[rr][cc] = tileType;
-  }
-}
 
 function generateLevel(num) {
   const grid = [];
@@ -364,97 +369,84 @@ function generateLevel(num) {
     for (let c = 0; c < COLS; c++) grid[r][c] = T_EMPTY;
   }
 
-  // Border walls (row 0 and row 12 in unit coords = tiles 0-1 and 24-25)
-  for (let uc = 0; uc < 13; uc++) { placeUnit(grid, 0, uc, T_STEEL); placeUnit(grid, 12, uc, T_STEEL); }
-  for (let ur = 0; ur < 13; ur++) { placeUnit(grid, ur, 0, T_STEEL); placeUnit(grid, ur, 12, T_STEEL); }
+  for (let c = 0; c < COLS; c++) { grid[0][c] = T_STEEL; grid[ROWS-1][c] = T_STEEL; }
+  for (let r = 0; r < ROWS; r++) { grid[r][0] = T_STEEL; grid[r][COLS-1] = T_STEEL; }
 
-  // Base at unit (11, 6) = bottom center
-  const bx = 6, by = 11;
-  grid[by * 2][bx * 2] = T_BASE;
-  grid[by * 2][bx * 2 + 1] = T_BASE;
-  grid[by * 2 + 1][bx * 2] = T_BASE;
-  grid[by * 2 + 1][bx * 2 + 1] = T_BASE;
-  // Brick wall around base
-  for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-    if (dr === 0 && dc === 0) continue;
-    const ur = by + dr, uc = bx + dc;
-    if (ur >= 1 && ur <= 11 && uc >= 1 && uc <= 11)
-      placeUnit(grid, ur, uc, T_BRICK);
+  const bx = Math.floor(COLS / 2);
+  const by = ROWS - 3;
+  grid[by][bx] = T_BASE;
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      if (dr === 0 && dc === 0) continue;
+      const rr = by + dr, cc = bx + dc;
+      if (rr > 0 && rr < ROWS-1 && cc > 0 && cc < COLS-1 && grid[rr][cc] === T_EMPTY)
+        grid[rr][cc] = T_BRICK;
+    }
   }
 
   let seed = num * 7919 + 1;
   function rng() { seed = (seed * 16807 + 0) % 2147483647; return (seed - 1) / 2147483646; }
 
-  // Place bricks in unit coords (working in 13x13 unit grid, inner 11x11)
-  const brickUnits = 8 + num * 2;
-  for (let i = 0; i < brickUnits; i++) {
-    const uc = Math.floor(rng() * 9) + 2; // unit cols 2-10
-    const ur = Math.floor(rng() * 8) + 2; // unit rows 2-9
-    const w = Math.floor(rng() * 2) + 1;  // 1-2 units wide
-    const h = Math.floor(rng() * 2) + 1;  // 1-2 units tall
+  const brickCount = 12 + num * 3;
+  for (let i = 0; i < brickCount; i++) {
+    const cx = Math.floor(rng() * (COLS - 4)) + 2;
+    const cy = Math.floor(rng() * (ROWS - 8)) + 2;
+    const w = Math.floor(rng() * 3) + 1;
+    const h = Math.floor(rng() * 3) + 1;
     for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) {
-      const rr = ur + dr, cc = uc + dc;
-      if (rr >= 1 && rr <= 10 && cc >= 1 && cc <= 11)
-        placeUnit(grid, rr, cc, T_BRICK);
+      const rr = cy + dr, cc = cx + dc;
+      if (rr > 1 && rr < ROWS - 4 && cc > 0 && cc < COLS - 1 && grid[rr][cc] === T_EMPTY)
+        grid[rr][cc] = T_BRICK;
     }
   }
 
-  // Place steel
-  const steelUnits = 2 + Math.floor(num * 1.5);
-  for (let i = 0; i < steelUnits; i++) {
-    const uc = Math.floor(rng() * 9) + 2;
-    const ur = Math.floor(rng() * 7) + 2;
+  const steelCount = 3 + num * 2;
+  for (let i = 0; i < steelCount; i++) {
+    const cx = Math.floor(rng() * (COLS - 4)) + 2;
+    const cy = Math.floor(rng() * (ROWS - 8)) + 3;
     const horiz = rng() > 0.5;
-    const len = Math.floor(rng() * 2) + 1;
+    const len = Math.floor(rng() * 3) + 2;
     for (let j = 0; j < len; j++) {
-      const rr = horiz ? ur : ur + j;
-      const cc = horiz ? uc + j : uc;
-      if (rr >= 1 && rr <= 10 && cc >= 1 && cc <= 11)
-        placeUnit(grid, rr, cc, T_STEEL);
+      const rr = horiz ? cy : cy + j;
+      const cc = horiz ? cx + j : cx;
+      if (rr > 1 && rr < ROWS - 4 && cc > 0 && cc < COLS - 1 && grid[rr][cc] === T_EMPTY)
+        grid[rr][cc] = T_STEEL;
     }
   }
 
-  // Place water (from level 3+)
   if (num >= 3) {
-    const waterUnits = Math.floor(rng() * 2) + 1;
-    for (let i = 0; i < waterUnits; i++) {
-      const uc = Math.floor(rng() * 7) + 3;
-      const ur = Math.floor(rng() * 5) + 3;
-      for (let dr = 0; dr < 2; dr++) for (let dc = 0; dc < 2; dc++) {
-        const rr = ur + dr, cc = uc + dc;
-        if (rr >= 1 && rr <= 10 && cc >= 1 && cc <= 11)
-          placeUnit(grid, rr, cc, T_WATER);
+    const waterCount = Math.floor(rng() * 3) + 1;
+    for (let i = 0; i < waterCount; i++) {
+      const cx = Math.floor(rng() * (COLS - 6)) + 3;
+      const cy = Math.floor(rng() * (ROWS - 10)) + 4;
+      for (let dr = 0; dr < 2; dr++) for (let dc = 0; dc < 3; dc++) {
+        const rr = cy + dr, cc = cx + dc;
+        if (grid[rr][cc] === T_EMPTY) grid[rr][cc] = T_WATER;
       }
     }
   }
 
-  // Place trees (from level 2+)
   if (num >= 2) {
-    const treeUnits = Math.floor(rng() * 3) + 1;
-    for (let i = 0; i < treeUnits; i++) {
-      const uc = Math.floor(rng() * 7) + 3;
-      const ur = Math.floor(rng() * 5) + 3;
-      placeUnit(grid, ur, uc, T_TREE);
+    const treeCount = Math.floor(rng() * 4) + 2;
+    for (let i = 0; i < treeCount; i++) {
+      const cx = Math.floor(rng() * (COLS - 6)) + 3;
+      const cy = Math.floor(rng() * (ROWS - 10)) + 3;
+      for (let dr = 0; dr < 2; dr++) for (let dc = 0; dc < 2; dc++) {
+        const rr = cy + dr, cc = cx + dc;
+        if (grid[rr][cc] === T_EMPTY) grid[rr][cc] = T_TREE;
+      }
     }
   }
 
-  // Clear spawn areas (2x2 units = 4x4 tiles each)
-  // Enemy spawns: units (1,1), (1,6), (1,11) — top left, center, right
-  // Player spawns: units (11,4), (11,8)
-  const spawnUnits = [[1,1],[1,6],[1,11],[11,4],[11,8]];
-  for (const [ur, uc] of spawnUnits) {
-    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-      const rr = ur + dr, cc = uc + dc;
-      if (rr >= 1 && rr <= 11 && cc >= 1 && cc <= 11) {
-        const tr = rr * 2, tc = cc * 2;
-        for (let tdr = 0; tdr < 2; tdr++) for (let tdc = 0; tdc < 2; tdc++) {
-          const ttr = tr + tdr, ttc = tc + tdc;
-          if (ttr >= 2 && ttr < ROWS-2 && ttc >= 2 && ttc < COLS-2) {
-            const t = grid[ttr][ttc];
-            if (t !== T_BASE && t !== T_STEEL) grid[ttr][ttc] = T_EMPTY;
-          }
-        }
-      }
+  // Clear spawn areas — larger (±2 tiles) for UNIT-sized tanks
+  // Enemy spawns: top-left, top-center, top-right
+  // Player spawns: bottom-left area, bottom-right area
+  const spawnClear = [[2, 2], [2, Math.floor(COLS/2)], [2, COLS-4], [ROWS-3, 4], [ROWS-3, COLS-8]];
+  for (const [sy, sx] of spawnClear) {
+    for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++) {
+      const rr = sy + dr, cc = sx + dc;
+      if (rr >= 1 && rr < ROWS-1 && cc >= 1 && cc < COLS-1)
+        if (grid[rr][cc] !== T_BASE && grid[rr][cc] !== T_STEEL) grid[rr][cc] = T_EMPTY;
     }
   }
 
@@ -718,8 +710,21 @@ function showMenu(id) {
 
 function startSinglePlayer() {
   isMultiplayer = false; isHost = true; playerNumber = 1;
-  score = 0; currentLevel = 0; gameMode = 'coop';
-  showLevelIntro();
+  score = 0; gameMode = 'coop';
+  showLevelSelect();
+}
+
+function showLevelSelect() {
+  const grid = document.getElementById('levelGrid');
+  grid.innerHTML = '';
+  for (let i = 1; i <= 15; i++) {
+    const btn = document.createElement('button');
+    btn.className = 'lvl-btn';
+    btn.textContent = i;
+    btn.onclick = () => { currentLevel = i - 1; showLevelIntro(); };
+    grid.appendChild(btn);
+  }
+  showMenu('menuLevelSelect');
 }
 
 function showModeSelect() { showMenu('menuMode'); }
@@ -860,8 +865,12 @@ function backToTitle() { gameState = 'title'; showMenu('menuTitle'); if (ws) ws.
 
 function playAgain() {
   score = 0; pvpScores = [0, 0]; currentLevel = 0;
-  if (isMultiplayer) sendNet({ type: 'restart', mode: gameMode });
-  showLevelIntro();
+  if (isMultiplayer) {
+    sendNet({ type: 'restart', mode: gameMode });
+    showLevelIntro();
+  } else {
+    showLevelSelect();
+  }
 }
 
 function pauseGame() {
@@ -897,12 +906,11 @@ function initLevel() {
   const lvl = currentLevel % LEVELS.length;
   grid = LEVELS[lvl].map(row => [...row]);
 
-  // Player spawns at unit centers: P1 at unit(11,4), P2 at unit(11,8)
-  const p1 = createTank(4 * UNIT + UNIT/2, 11 * UNIT + UNIT/2, 'up', true, 1);
+  const p1 = createTank(4 * TILE + TILE, (ROWS - 3) * TILE + TILE/2, 'up', true, 1);
   players.push(p1);
 
   if (isMultiplayer) {
-    const p2 = createTank(8 * UNIT + UNIT/2, 11 * UNIT + UNIT/2, 'up', true, 2);
+    const p2 = createTank((COLS - 8) * TILE + TILE/2, (ROWS - 3) * TILE + TILE/2, 'up', true, 2);
     players.push(p2);
   }
 
@@ -918,70 +926,64 @@ function initPvpLevel() {
   grid = [];
   for (let r = 0; r < ROWS; r++) { grid[r] = []; for (let c = 0; c < COLS; c++) grid[r][c] = T_EMPTY; }
 
-  // Border walls in unit coords
-  for (let uc = 0; uc < 13; uc++) { placeUnit(grid, 0, uc, T_STEEL); placeUnit(grid, 12, uc, T_STEEL); }
-  for (let ur = 0; ur < 13; ur++) { placeUnit(grid, ur, 0, T_STEEL); placeUnit(grid, ur, 12, T_STEEL); }
+  for (let c = 0; c < COLS; c++) { grid[0][c] = T_STEEL; grid[ROWS-1][c] = T_STEEL; }
+  for (let r = 0; r < ROWS; r++) { grid[r][0] = T_STEEL; grid[r][COLS-1] = T_STEEL; }
 
-  // P1 base at unit(11,6) — bottom center
-  const b1r = 11, b1c = 6;
-  for (let dr = 0; dr < 2; dr++) for (let dc = 0; dc < 2; dc++) grid[b1r*2+dr][b1c*2+dc] = T_BASE;
+  const bx = Math.floor(COLS / 2);
+  // P1 base bottom
+  grid[ROWS - 3][bx] = T_BASE;
   for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
     if (dr === 0 && dc === 0) continue;
-    const ur = b1r + dr, uc = b1c + dc;
-    if (ur >= 1 && ur <= 11 && uc >= 1 && uc <= 11) placeUnit(grid, ur, uc, T_BRICK);
+    const rr = ROWS - 3 + dr, cc = bx + dc;
+    if (rr > 0 && rr < ROWS-1 && cc > 0 && cc < COLS-1 && grid[rr][cc] === T_EMPTY) grid[rr][cc] = T_BRICK;
   }
-
-  // P2 base at unit(1,6) — top center
-  const b2r = 1, b2c = 6;
-  for (let dr = 0; dr < 2; dr++) for (let dc = 0; dc < 2; dc++) grid[b2r*2+dr][b2c*2+dc] = T_BASE2;
+  // P2 base top
+  grid[2][bx] = T_BASE2;
   for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
     if (dr === 0 && dc === 0) continue;
-    const ur = b2r + dr, uc = b2c + dc;
-    if (ur >= 1 && ur <= 11 && uc >= 1 && uc <= 11) placeUnit(grid, ur, uc, T_BRICK);
+    const rr = 2 + dr, cc = bx + dc;
+    if (rr > 0 && rr < ROWS-1 && cc > 0 && cc < COLS-1 && grid[rr][cc] === T_EMPTY) grid[rr][cc] = T_BRICK;
   }
 
   let seed = (currentLevel + 1) * 3571;
   function rng() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
 
-  // Symmetric obstacles using unit grid (mirror top-bottom)
-  const midUnit = 6; // middle unit row
-  const numClusters = 6 + currentLevel;
+  const midRow = Math.floor(ROWS / 2);
+  const numClusters = 8 + currentLevel * 2;
   for (let i = 0; i < numClusters; i++) {
-    const uc = Math.floor(rng() * 9) + 2;
-    const ur = midUnit + Math.floor(rng() * 3) + 1; // rows 7-9
+    const cx = Math.floor(rng() * (COLS - 6)) + 3;
+    const cy = midRow + Math.floor(rng() * (midRow - 5)) + 2;
+    const w = Math.floor(rng() * 3) + 1;
+    const h = Math.floor(rng() * 2) + 1;
     const tileType = rng() < 0.2 ? T_STEEL : T_BRICK;
-    const mrr = 12 - ur; // mirror row
-    placeUnit(grid, ur, uc, tileType);
-    placeUnit(grid, mrr, uc, tileType);
-  }
-
-  // Steel divider in middle
-  for (let uc = 2; uc <= 10; uc++) {
-    if (rng() < 0.35) placeUnit(grid, midUnit, uc, T_STEEL);
-  }
-
-  // Clear spawn/base areas
-  const clearUnits = [[11,4],[11,6],[11,8],[1,4],[1,6],[1,8]];
-  for (const [ur, uc] of clearUnits) {
-    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-      const rr = ur + dr, cc = uc + dc;
-      if (rr >= 1 && rr <= 11 && cc >= 1 && cc <= 11) {
-        const tr = rr * 2, tc = cc * 2;
-        for (let tdr = 0; tdr < 2; tdr++) for (let tdc = 0; tdc < 2; tdc++) {
-          const ttr = tr + tdr, ttc = tc + tdc;
-          if (ttr >= 2 && ttr < ROWS-2 && ttc >= 2 && ttc < COLS-2) {
-            const t = grid[ttr][ttc];
-            if (t !== T_BASE && t !== T_BASE2 && t !== T_STEEL) grid[ttr][ttc] = T_EMPTY;
-          }
-        }
+    for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) {
+      const rr = cy + dr, cc = cx + dc;
+      const mrr = ROWS - 1 - rr;
+      if (rr > midRow - 2 && rr < ROWS - 4 && cc > 0 && cc < COLS - 1) {
+        if (grid[rr][cc] === T_EMPTY) grid[rr][cc] = tileType;
+        if (grid[mrr][cc] === T_EMPTY) grid[mrr][cc] = tileType;
       }
     }
   }
 
-  // Players at unit centers
-  const p1 = createTank(4 * UNIT + UNIT/2, 11 * UNIT + UNIT/2, 'up', true, 1);
+  for (let c = 1; c < COLS - 1; c++) {
+    if (grid[midRow][c] === T_EMPTY && rng() < 0.4) grid[midRow][c] = T_STEEL;
+  }
+
+  // Clear areas around bases and spawn points (larger for UNIT-sized tanks)
+  const clearAreas = [[ROWS-3, bx], [ROWS-3, 4], [2, bx], [2, COLS-5]];
+  for (const [sy, sx] of clearAreas) {
+    for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++) {
+      const rr = sy + dr, cc = sx + dc;
+      if (rr >= 1 && rr < ROWS-1 && cc >= 1 && cc < COLS-1)
+        if (grid[rr][cc] !== T_BASE && grid[rr][cc] !== T_BASE2 && grid[rr][cc] !== T_STEEL)
+          grid[rr][cc] = T_EMPTY;
+    }
+  }
+
+  const p1 = createTank(4 * TILE + TILE, (ROWS - 3) * TILE + TILE/2, 'up', true, 1);
   p1.lives = 5; players.push(p1);
-  const p2 = createTank(8 * UNIT + UNIT/2, 1 * UNIT + UNIT/2, 'down', true, 2);
+  const p2 = createTank((COLS - 5) * TILE + TILE/2, 2 * TILE + TILE/2, 'down', true, 2);
   p2.lives = 5; players.push(p2);
 
   enemiesRemaining = 0; maxActiveEnemies = 0;
@@ -992,11 +994,10 @@ function initPvpLevel() {
 // ============================================================
 // SPAWNING
 // ============================================================
-// Enemy spawns at unit centers: (1,1), (1,6), (1,11) — top-left, top-center, top-right
 const SPAWN_POINTS = [
-  { x: 1 * UNIT + UNIT/2, y: 1 * UNIT + UNIT/2 },
-  { x: 6 * UNIT + UNIT/2, y: 1 * UNIT + UNIT/2 },
-  { x: 11 * UNIT + UNIT/2, y: 1 * UNIT + UNIT/2 },
+  { x: 2 * TILE + TILE, y: 2 * TILE + TILE/2 },
+  { x: Math.floor(COLS/2) * TILE + TILE/2, y: 2 * TILE + TILE/2 },
+  { x: (COLS - 4) * TILE, y: 2 * TILE + TILE/2 },
 ];
 
 function spawnEnemy() {
@@ -1055,9 +1056,9 @@ function spawnEnemy() {
 function spawnPowerupFromEnemy(x, y) {
   const types = ['shield', 'speed', 'life', 'bomb', 'timer', 'shovel', 'star'];
   const type = types[Math.floor(Math.random() * types.length)];
-  // Spawn at random unit-aligned position on the map
-  const px = (2 + Math.floor(Math.random() * 9)) * UNIT + UNIT / 2;
-  const py = (2 + Math.floor(Math.random() * 8)) * UNIT + UNIT / 2;
+  // Spawn at random position on the map
+  const px = (3 + Math.floor(Math.random() * (COLS - 6))) * TILE + TILE / 2;
+  const py = (3 + Math.floor(Math.random() * (ROWS - 8))) * TILE + TILE / 2;
   powerups.push(createPowerup(px, py, type));
 }
 
@@ -1131,20 +1132,15 @@ function isBlocked(x, y, size, excludeTank) {
 // SHOVEL POWERUP (steel base walls)
 // ============================================================
 function activateShovel() {
-  // Base is at unit(11,6) — surround with steel at unit level
-  const bur = 11, buc = 6;
+  const bx = Math.floor(COLS / 2);
+  const by = ROWS - 3;
   shovelOrigTiles = [];
-  for (let dur = -1; dur <= 1; dur++) for (let duc = -1; duc <= 1; duc++) {
-    if (dur === 0 && duc === 0) continue;
-    const ur = bur + dur, uc = buc + duc;
-    if (ur >= 1 && ur <= 11 && uc >= 1 && uc <= 11) {
-      for (let tdr = 0; tdr < 2; tdr++) for (let tdc = 0; tdc < 2; tdc++) {
-        const tr = ur * 2 + tdr, tc = uc * 2 + tdc;
-        if (tr >= 0 && tr < ROWS && tc >= 0 && tc < COLS) {
-          shovelOrigTiles.push({ r: tr, c: tc, t: grid[tr][tc] });
-          if (grid[tr][tc] !== T_BASE) grid[tr][tc] = T_STEEL;
-        }
-      }
+  for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+    if (dr === 0 && dc === 0) continue;
+    const rr = by + dr, cc = bx + dc;
+    if (rr > 0 && rr < ROWS-1 && cc > 0 && cc < COLS-1) {
+      shovelOrigTiles.push({ r: rr, c: cc, t: grid[rr][cc] });
+      if (grid[rr][cc] !== T_BASE) grid[rr][cc] = T_STEEL;
     }
   }
   shovelTimer = 600; // 10 seconds
@@ -1241,8 +1237,8 @@ function updateSimulation() {
     pvpPowerupTimer--;
     if (pvpPowerupTimer <= 0) {
       pvpPowerupTimer = 400 + Math.floor(Math.random() * 200);
-      const px = (2 + Math.floor(Math.random() * 9)) * UNIT + UNIT / 2;
-      const py = (3 + Math.floor(Math.random() * 7)) * UNIT + UNIT / 2;
+      const px = (3 + Math.floor(Math.random() * (COLS - 6))) * TILE + TILE / 2;
+      const py = (5 + Math.floor(Math.random() * (ROWS - 10))) * TILE + TILE / 2;
       const types = ['shield', 'speed', 'life'];
       powerups.push(createPowerup(px, py, types[Math.floor(Math.random() * types.length)]));
     }
@@ -1508,17 +1504,15 @@ function updateTankMovement(tank, dir) {
   tank.dir = dir;
   const d = DIR[dir];
 
-  // When changing between horizontal/vertical, snap to nearest unit center
+  // When changing between horizontal/vertical, snap to nearest tile center
   if (prevDir !== dir) {
     const isHoriz = d.x !== 0;
     if (isHoriz) {
-      // Snap Y to nearest unit center
-      const unitY = Math.round((tank.y - UNIT/2) / UNIT) * UNIT + UNIT/2;
-      if (Math.abs(tank.y - unitY) < SNAP_SENS) tank.y = unitY;
+      const tileY = Math.round((tank.y - TILE/2) / TILE) * TILE + TILE/2;
+      if (Math.abs(tank.y - tileY) < SNAP_SENS) tank.y = tileY;
     } else {
-      // Snap X to nearest unit center
-      const unitX = Math.round((tank.x - UNIT/2) / UNIT) * UNIT + UNIT/2;
-      if (Math.abs(tank.x - unitX) < SNAP_SENS) tank.x = unitX;
+      const tileX = Math.round((tank.x - TILE/2) / TILE) * TILE + TILE/2;
+      if (Math.abs(tank.x - tileX) < SNAP_SENS) tank.x = tileX;
     }
   }
 
@@ -1543,9 +1537,8 @@ function updateEnemyAI(enemy) {
     enemy.aiTurnTimer = 20 + Math.floor(Math.random() * 40);
 
     const targets = players.filter(p => p.alive);
-    // Base center at unit(11,6)
-    const bx = 6 * UNIT + UNIT/2;
-    const by = 11 * UNIT + UNIT/2;
+    const bx = Math.floor(COLS / 2) * TILE + TILE/2;
+    const by = (ROWS - 3) * TILE + TILE/2;
 
     if (Math.random() < 0.35 && targets.length > 0) {
       const target = targets[Math.floor(Math.random() * targets.length)];
@@ -1558,7 +1551,7 @@ function updateEnemyAI(enemy) {
         enemy.aiDir = Math.random() < 0.6 ? 'down' : (['left','right'])[Math.floor(Math.random()*2)];
       } else {
         const dx = bx - enemy.x;
-        enemy.aiDir = Math.abs(dx) > UNIT ? (dx > 0 ? 'right' : 'left') : 'down';
+        enemy.aiDir = Math.abs(dx) > TILE * 2 ? (dx > 0 ? 'right' : 'left') : 'down';
       }
     } else {
       const dirs = ['up', 'down', 'left', 'right'];
@@ -1707,35 +1700,35 @@ function draw() {
     }
   }
 
-  // Base destroyed markers (bases at unit 11,6 and 1,6)
+  // Base destroyed markers
   if (baseDestroyed) {
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-    const bx = 6*UNIT+UNIT/2, by = 11*UNIT+UNIT/2;
-    ctx.beginPath(); ctx.moveTo(bx-12,by-12); ctx.lineTo(bx+12,by+12); ctx.moveTo(bx+12,by-12); ctx.lineTo(bx-12,by+12); ctx.stroke();
+    const bx = Math.floor(COLS/2)*TILE+TILE/2, by = (ROWS-3)*TILE+TILE/2;
+    ctx.beginPath(); ctx.moveTo(bx-10,by-10); ctx.lineTo(bx+10,by+10); ctx.moveTo(bx+10,by-10); ctx.lineTo(bx-10,by+10); ctx.stroke();
   }
   if (base2Destroyed) {
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-    const bx2 = 6*UNIT+UNIT/2, by2 = 1*UNIT+UNIT/2;
-    ctx.beginPath(); ctx.moveTo(bx2-12,by2-12); ctx.lineTo(bx2+12,by2+12); ctx.moveTo(bx2+12,by2-12); ctx.lineTo(bx2-12,by2+12); ctx.stroke();
+    const bx2 = Math.floor(COLS/2)*TILE+TILE/2, by2 = 2*TILE+TILE/2;
+    ctx.beginPath(); ctx.moveTo(bx2-10,by2-10); ctx.lineTo(bx2+10,by2+10); ctx.moveTo(bx2+10,by2-10); ctx.lineTo(bx2-10,by2+10); ctx.stroke();
   }
 
   // PvP labels
   if (gameMode === 'pvp') {
-    const bx = 6*UNIT+UNIT/2;
-    const byP1 = 11*UNIT+UNIT/2, byP2 = 1*UNIT+UNIT/2;
-    ctx.font = '8px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
-    if (!baseDestroyed) ctx.fillText('P1', bx, byP1+UNIT/2+8);
-    if (!base2Destroyed) ctx.fillText('P2', bx, byP2-UNIT/2-4);
+    const bx = Math.floor(COLS/2)*TILE+TILE/2;
+    const byP1 = (ROWS-3)*TILE+TILE/2, byP2 = 2*TILE+TILE/2;
+    ctx.font = '7px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+    if (!baseDestroyed) ctx.fillText('P1', bx, byP1+TILE+4);
+    if (!base2Destroyed) ctx.fillText('P2', bx, byP2-TILE+2);
     if (pvpLabelTimer > 0) {
       pvpLabelTimer--;
       const alpha = pvpLabelTimer > 60 ? 1 : pvpLabelTimer/60;
       if (frameTick % 30 < 22) {
-        ctx.font = '10px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+        ctx.font = '9px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
         ctx.globalAlpha = alpha;
         const myBY = playerNumber===1 ? byP1 : byP2;
         const enBY = playerNumber===1 ? byP2 : byP1;
-        ctx.fillText('DEFEND!', bx, myBY + (playerNumber===1 ? UNIT/2+18 : -UNIT/2-10));
-        ctx.fillText('ATTACK!', bx, enBY + (playerNumber===1 ? -UNIT/2-10 : UNIT/2+18));
+        ctx.fillText('DEFEND!', bx, myBY + (playerNumber===1 ? TILE+14 : -TILE-6));
+        ctx.fillText('ATTACK!', bx, enBY + (playerNumber===1 ? -TILE-6 : TILE+14));
         ctx.globalAlpha = 1;
       }
     }
