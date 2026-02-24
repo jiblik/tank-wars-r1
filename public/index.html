@@ -629,11 +629,18 @@ function updateTouchInput() {
 let ws = null;
 let roomCodeStr = '';
 
-function connectWS() {
+function connectWS(onOpen) {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${proto}//${location.host}`);
-  ws.onopen = () => console.log('WS connected');
-  ws.onclose = () => { ws = null; };
+  ws.onopen = () => { console.log('WS connected'); if (onOpen) onOpen(); };
+  ws.onerror = (e) => console.error('WS error', e);
+  ws.onclose = () => {
+    ws = null;
+    // Auto-reconnect if in game
+    if (isMultiplayer && gameState === 'playing') {
+      setTimeout(() => connectWS(), 2000);
+    }
+  };
   ws.onmessage = (evt) => {
     const msg = JSON.parse(evt.data);
     handleNetMessage(msg);
@@ -763,16 +770,12 @@ function showCreateRoom(mode) {
   gameState = 'creating';
   document.getElementById('modeLabel').textContent = gameMode === 'pvp' ? 'PVP DUEL' : 'CO-OP VS AI';
   showMenu('menuCreate');
-  connectWS();
-  const waitForWs = setInterval(() => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      clearInterval(waitForWs);
-      sendNet({ type: 'create_room', mode: gameMode });
-    }
-  }, 100);
   isMultiplayer = true;
   isHost = true;
   playerNumber = 1;
+  connectWS(() => {
+    sendNet({ type: 'create_room', mode: gameMode });
+  });
 }
 
 function showJoinRoom() {
@@ -791,7 +794,25 @@ function joinRoom() {
     document.getElementById('joinError').textContent = 'ENTER 4-DIGIT CODE';
     return;
   }
-  sendNet({ type: 'join_room', code });
+  document.getElementById('joinError').textContent = 'CONNECTING...';
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    sendNet({ type: 'join_room', code });
+  } else {
+    // WS not ready yet — wait for it
+    const waitJoin = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        clearInterval(waitJoin);
+        sendNet({ type: 'join_room', code });
+      }
+    }, 200);
+    // Timeout after 10 seconds
+    setTimeout(() => {
+      clearInterval(waitJoin);
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        document.getElementById('joinError').textContent = 'CONNECTION FAILED. TRY AGAIN.';
+      }
+    }, 10000);
+  }
 }
 
 function cancelRoom() {
